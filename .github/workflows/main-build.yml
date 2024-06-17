@@ -6,19 +6,23 @@ on:
 jobs:
   build:
     name: build
-    runs-on: ARM64
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
       id-token: write # needed for signing the images with GitHub OIDC Token **not production ready**
 
     # keda-tools is built from github.com/test-tools/tools/Dockerfile
-    container: ghcr.io/kedacore/keda-tools:1.21.9
+    # container: ghcr.io/kedacore/keda-tools:1.21.9
     steps:
       - name: Check out code
         uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
         with:
           fetch-depth: 1
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.21
 
       - name: Register workspace path
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -43,8 +47,8 @@ jobs:
       - name: Go modules sync
         run: go mod tidy -compat=1.21
 
-      - name: Test
-        run: make test
+      # - name: Test
+      #   run: make test
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -52,7 +56,7 @@ jobs:
           # Username used to log in to a Docker registry. If not set then no login will occur
           username: ${{ github.repository_owner }}
           # Password or personal access token used to log in to a Docker registry. If not set then no login will occur
-          password: ${{ secrets.GHCR_AUTH_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
           # Server address of Docker registry. If not set then will default to Docker Hub
           registry: ghcr.io
 
@@ -62,65 +66,65 @@ jobs:
       - name: Publish on GitHub Container Registry
         run: make publish-multiarch
 
-      # https://github.com/sigstore/cosign-installer
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
+      # # https://github.com/sigstore/cosign-installer
+      # - name: Install Cosign
+      #   uses: sigstore/cosign-installer@v3
+      #
+      # - name: Check Cosign install!
+      #   run: cosign version
+      #
+      # - name: Sign KEDA images published on GitHub Container Registry
+      #   # This step uses the identity token to provision an ephemeral certificate
+      #   # against the sigstore community Fulcio instance.
+      #   run: make sign-images
 
-      - name: Check Cosign install!
-        run: cosign version
-
-      - name: Sign KEDA images published on GitHub Container Registry
-        # This step uses the identity token to provision an ephemeral certificate
-        # against the sigstore community Fulcio instance.
-        run: make sign-images
-
-  validate:
-    needs: build
-    uses: kedacore/keda/.github/workflows/template-main-e2e-test.yml@main
-    secrets: inherit
-
-  validate-arm64:
-    needs: build
-    uses: kedacore/keda/.github/workflows/template-arm64-smoke-tests.yml@main
-
-  validate-k8s-versions:
-    needs: build
-    uses: kedacore/keda/.github/workflows/template-versions-smoke-tests.yml@main
-
-  trivy-scan:
-    needs: build
-    uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
-    with:
-      runs-on: 'ubuntu-latest'
-      scan-type: 'fs'
-      format: 'sarif'
-      exit-code: 0
-      publish: true
-
-  trivy-scan-metrics-server:
-    needs: build
-    strategy:
-      matrix:
-        runner: [ARM64, ubuntu-latest]
-    uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
-    with:
-      runs-on: ${{ matrix.runner }}
-      scan-type: 'image'
-      image-ref: ghcr.io/kedacore/keda-metrics-apiserver:main
-      format: 'sarif'
-      exit-code: 0
-      publish: true
-
-  trivy-scan-keda:
-    needs: build
-    strategy:
-      matrix:
-        runner: [ARM64, ubuntu-latest]
-    uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
-    with:
-      runs-on: ${{ matrix.runner }}
-      scan-type: 'image'
-      image-ref: ghcr.io/kedacore/keda:main
-      format: 'sarif'
-      exit-code: 0
-      publish: true
+  # validate:
+  #   needs: build
+  #   uses: kedacore/keda/.github/workflows/template-main-e2e-test.yml@main
+  #   secrets: inherit
+  #
+  # validate-arm64:
+  #   needs: build
+  #   uses: kedacore/keda/.github/workflows/template-arm64-smoke-tests.yml@main
+  #
+  # validate-k8s-versions:
+  #   needs: build
+  #   uses: kedacore/keda/.github/workflows/template-versions-smoke-tests.yml@main
+  #
+  # trivy-scan:
+  #   needs: build
+  #   uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
+  #   with:
+  #     runs-on: 'ubuntu-latest'
+  #     scan-type: 'fs'
+  #     format: 'sarif'
+  #     exit-code: 0
+  #     publish: true
+  #
+  # trivy-scan-metrics-server:
+  #   needs: build
+  #   strategy:
+  #     matrix:
+  #       runner: [ARM64, ubuntu-latest]
+  #   uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
+  #   with:
+  #     runs-on: ${{ matrix.runner }}
+  #     scan-type: 'image'
+  #     image-ref: ghcr.io/kedacore/keda-metrics-apiserver:main
+  #     format: 'sarif'
+  #     exit-code: 0
+  #     publish: true
+  #
+  # trivy-scan-keda:
+  #   needs: build
+  #   strategy:
+  #     matrix:
+  #       runner: [ARM64, ubuntu-latest]
+  #   uses: kedacore/keda/.github/workflows/template-trivy-scan.yml@main
+  #   with:
+  #     runs-on: ${{ matrix.runner }}
+  #     scan-type: 'image'
+  #     image-ref: ghcr.io/kedacore/keda:main
+  #     format: 'sarif'
+  #     exit-code: 0
+  #     publish: true

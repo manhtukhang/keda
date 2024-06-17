@@ -16,50 +16,46 @@ import (
 	kedautil "github.com/kedacore/keda/v2/pkg/util"
 )
 
-type kubernetesWorkloadScaler struct {
+type kubernetesWorkloadBalanceScaler struct {
 	metricType v2.MetricTargetType
-	metadata   *kubernetesWorkloadMetadata
+	metadata   *kubernetesWorkloadBalanceMetadata
 	kubeClient client.Client
 	logger     logr.Logger
 }
 
-const (
-	kubernetesWorkloadMetricType = "External"
-	podSelectorKey               = "podSelector"
-	valueKey                     = "value"
-	activationValueKey           = "activationValue"
-	keepMinCountKey              = "keepMinCount"
-)
+// const (
+// 	kubernetesWorkloadMetricType = "External"
+// 	podSelectorKey               = "podSelector"
+// 	valueKey                     = "value"
+// 	activationValueKey           = "activationValue"
+// )
 
-var phasesCountedAsTerminated = []corev1.PodPhase{
-	corev1.PodSucceeded,
-	corev1.PodFailed,
-	corev1.PodPending,
-	corev1.PodUnknown,
-}
+// var phasesCountedAsTerminated = []corev1.PodPhase{
+// 	corev1.PodSucceeded,
+// 	corev1.PodFailed,
+// }
 
-type kubernetesWorkloadMetadata struct {
+type kubernetesWorkloadBalanceMetadata struct {
 	podSelector     labels.Selector
 	namespace       string
 	value           float64
 	activationValue float64
-	keepMinCount    int64
 	triggerIndex    int
 }
 
 // NewKubernetesWorkloadScaler creates a new kubernetesWorkloadScaler
-func NewKubernetesWorkloadScaler(kubeClient client.Client, config *scalersconfig.ScalerConfig) (Scaler, error) {
+func NewKubernetesWorkloadBalanceScaler(kubeClient client.Client, config *scalersconfig.ScalerConfig) (Scaler, error) {
 	metricType, err := GetMetricTargetType(config)
 	if err != nil {
 		return nil, fmt.Errorf("error getting scaler metric type: %w", err)
 	}
 
-	meta, parseErr := parseWorkloadMetadata(config)
+	meta, parseErr := parseWorkloadBalanceMetadata(config)
 	if parseErr != nil {
 		return nil, fmt.Errorf("error parsing kubernetes workload metadata: %w", parseErr)
 	}
 
-	return &kubernetesWorkloadScaler{
+	return &kubernetesWorkloadBalanceScaler{
 		metricType: metricType,
 		metadata:   meta,
 		kubeClient: kubeClient,
@@ -67,8 +63,8 @@ func NewKubernetesWorkloadScaler(kubeClient client.Client, config *scalersconfig
 	}, nil
 }
 
-func parseWorkloadMetadata(config *scalersconfig.ScalerConfig) (*kubernetesWorkloadMetadata, error) {
-	meta := &kubernetesWorkloadMetadata{}
+func parseWorkloadBalanceMetadata(config *scalersconfig.ScalerConfig) (*kubernetesWorkloadBalanceMetadata, error) {
+	meta := &kubernetesWorkloadBalanceMetadata{}
 	var err error
 	meta.namespace = config.ScalableObjectNamespace
 	podSelector, err := labels.Parse(config.TriggerMetadata[podSelectorKey])
@@ -95,26 +91,17 @@ func parseWorkloadMetadata(config *scalersconfig.ScalerConfig) (*kubernetesWorkl
 		meta.activationValue = activationValue
 	}
 
-	meta.keepMinCount = 0
-	if val, ok := config.TriggerMetadata[keepMinCountKey]; ok {
-		keepMinCount, err := strconv.ParseInt(val, 0, 64)
-		if err != nil || keepMinCount < 0 {
-			return nil, fmt.Errorf("value must be an int greater than 0")
-		}
-		meta.keepMinCount = keepMinCount
-	}
-
 	meta.triggerIndex = config.TriggerIndex
 	return meta, nil
 }
 
 // Close no need for kubernetes workload scaler
-func (s *kubernetesWorkloadScaler) Close(context.Context) error {
+func (s *kubernetesWorkloadBalanceScaler) Close(context.Context) error {
 	return nil
 }
 
 // GetMetricSpecForScaling returns the metric spec for the HPA
-func (s *kubernetesWorkloadScaler) GetMetricSpecForScaling(context.Context) []v2.MetricSpec {
+func (s *kubernetesWorkloadBalanceScaler) GetMetricSpecForScaling(context.Context) []v2.MetricSpec {
 	externalMetric := &v2.ExternalMetricSource{
 		Metric: v2.MetricIdentifier{
 			Name: GenerateMetricNameWithIndex(s.metadata.triggerIndex, kedautil.NormalizeString(fmt.Sprintf("workload-%s", s.metadata.namespace))),
@@ -126,23 +113,18 @@ func (s *kubernetesWorkloadScaler) GetMetricSpecForScaling(context.Context) []v2
 }
 
 // GetMetricsAndActivity returns value for a supported metric
-func (s *kubernetesWorkloadScaler) GetMetricsAndActivity(ctx context.Context, metricName string) ([]external_metrics.ExternalMetricValue, bool, error) {
+func (s *kubernetesWorkloadBalanceScaler) GetMetricsAndActivity(ctx context.Context, metricName string) ([]external_metrics.ExternalMetricValue, bool, error) {
 	pods, err := s.getMetricValue(ctx)
 	if err != nil {
 		return []external_metrics.ExternalMetricValue{}, false, fmt.Errorf("error inspecting kubernetes workload: %w", err)
 	}
-  
-  if s.metadata.keepMinCount > 0 {
-	  metric := GenerateMetricInMili(metricName, float64(s.metadata.keepMinCount - pods))
-    return []external_metrics.ExternalMetricValue{metric}, float64(pods) < s.metadata.activationValue, nil
-  } else {
-	  metric := GenerateMetricInMili(metricName, float64(pods))
-    return []external_metrics.ExternalMetricValue{metric}, float64(pods) > s.metadata.activationValue, nil
-  }
-	
+
+	metric := GenerateMetricInMili(metricName, float64(pods))
+
+	return []external_metrics.ExternalMetricValue{metric}, float64(pods) < s.metadata.activationValue, nil
 }
 
-func (s *kubernetesWorkloadScaler) getMetricValue(ctx context.Context) (int64, error) {
+func (s *kubernetesWorkloadBalanceScaler) getMetricValue(ctx context.Context) (int64, error) {
 	podList := &corev1.PodList{}
 	listOptions := client.ListOptions{}
 	listOptions.LabelSelector = s.metadata.podSelector
@@ -162,13 +144,4 @@ func (s *kubernetesWorkloadScaler) getMetricValue(ctx context.Context) (int64, e
 	}
 
 	return count, nil
-}
-
-func getCountValue(pod corev1.Pod) int64 {
-	for _, ignore := range phasesCountedAsTerminated {
-		if pod.Status.Phase == ignore {
-			return 0
-		}
-	}
-	return 1
 }
